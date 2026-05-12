@@ -1,0 +1,194 @@
+{
+  "app_name": "Money-Making Dashboard",
+  "theme": {
+    "mode": "dark",
+    "archetype": "5 (Jewel & Luxury) + 4 (Swiss/High-Contrast)",
+    "colors": {
+      "background": "#060B19",
+      "surface": "#111A33",
+      "surface_highlight": "#1C2847",
+      "border": "#232E4A",
+      "primary": "#10B981",
+      "primary_glow": "rgba(16, 185, 129, 0.2)",
+      "danger": "#FF3B30",
+      "danger_glow": "rgba(255, 59, 48, 0.2)",
+      "text_primary": "#FFFFFF",
+      "text_secondary": "#9CA3AF",
+      "text_muted": "#4B5563"
+    },
+    "gradients": {
+      "premium_card": ["#111A33", "#060B19"],
+      "gold_accent": ["#FBBF24", "#D97706"],
+      "paywall_bg": ["#060B19", "#0A1733", "#060B19"]
+    },
+    "spacing": {
+      "xs": 4,
+      "sm": 8,
+      "md": 16,
+      "lg": 24,
+      "xl": 32,
+      "xxl": 48
+    },
+    "borderRadius": {
+      "sm": 8,
+      "md": 16,
+      "lg": 24,
+      "full": 9999
+    }
+  },
+  "typography": {
+    "font_family": {
+      "heading": "Outfit",
+      "body": "Manrope",
+      "mono": "Space Mono"
+    },
+    "sizes": {
+      "h1": { "fontSize": 36, "lineHeight": 40, "letterSpacing": -1 },
+      "h2": { "fontSize": 28, "lineHeight": 34, "letterSpacing": -0.5 },
+      "h3": { "fontSize": 22, "lineHeight": 28, "letterSpacing": -0.5 },
+      "body_lg": { "fontSize": 18, "lineHeight": 26 },
+      "body": { "fontSize": 16, "lineHeight": 24 },
+      "sm": { "fontSize": 14, "lineHeight": 20 },
+      "xs": { "fontSize": 12, "lineHeight": 16, "textTransform": "uppercase", "letterSpacing": 1.2 }
+    }
+  },
+  "components_specs": {
+    "LeakageMeter": {
+      "type": "Sticky Header / Hero",
+      "style": "Technical/Terminal Look",
+      "background": "#060B19",
+      "borderBottomWidth": 1,
+      "borderColor": "#232E4A",
+      "features": [
+        "Monospaced red pulsing text for the leakage amount (e.g., '- ₹12,450 / mo')",
+        "Label: 'WEALTH LEAKAGE DETECTED'",
+        "Use Animated.View to pulse the background slightly with danger_glow"
+      ]
+    },
+    "StandardCard": {
+      "background": "#111A33",
+      "borderRadius": 16,
+      "borderWidth": 1,
+      "borderColor": "#232E4A",
+      "padding": 24,
+      "shadow": "none (Rely on borders for depth)"
+    },
+    "PrimaryButton": {
+      "background": "#10B981",
+      "borderRadius": 9999,
+      "paddingVertical": 16,
+      "alignItems": "center",
+      "labelStyle": {
+        "color": "#060B19",
+        "fontFamily": "Outfit-Bold",
+        "fontSize": 16
+      }
+    },
+    "PaywallButton": {
+      "background": "#FFFFFF",
+      "borderRadius": 16,
+      "paddingVertical": 18,
+      "labelStyle": {
+        "color": "#060B19",
+        "fontFamily": "Outfit-Bold",
+        "fontSize": 18
+      }
+    },
+    "Slider": {
+      "library": "@react-native-community/slider",
+      "minimumTrackTintColor": "#10B981",
+      "maximumTrackTintColor": "#232E4A",
+      "thumbTintColor": "#FFFFFF"
+    },
+    "Chart": {
+      "library": "react-native-svg / victory-native (or custom SVG paths)",
+      "style": "Minimalist, no grid lines. Area chart with gradient fills.",
+      "colors": ["#10B981", "#FF3B30"]
+    }
+  },
+  "screens": {
+    "OnboardingWizard": {
+      "layout": "FullScreen with bottom-anchored controls",
+      "steps": [
+        {
+          "step": 1,
+          "title": "What's your annual income?",
+          "interaction": "Interactive slider + large text input (Targeting 7LPA+)"
+        },
+        {
+          "step": 2,
+          "title": "Select your active debts",
+          "interaction": "Selectable Grid of Cards (Home, Auto, Personal, Credit Card)"
+        },
+        {
+          "step": 3,
+          "title": "Analyzing wealth leakage...",
+          "interaction": "Fake loading screen with sequential checks (Scanning cards... Checking rates...)"
+        }
+      ]
+    },
+    "Dashboard": {
+      "layout": "SafeAreaView + ScrollView",
+      "structure": [
+        "LeakageMeter (Sticky Top)",
+        "Module A: Loan Arbitrage Engine Card",
+        "Module B: Credit Card Reward Optimizer Card",
+        "Module C: Tax-Saving Predictor Card"
+      ]
+    },
+    "LoanArbitrageEngine": {
+      "elements": [
+        "Current EMI vs Optimized EMI comparison",
+        "Lifetime Interest Saved (Huge Green Text)",
+        "Interactive Tenure Slider",
+        "Stacked Area Chart showing Principal vs Interest over time",
+        "CTA: 'Check Refinance Eligibility'"
+      ]
+    },
+    "CreditCardOptimizer": {
+      "elements": [
+        "Horizontal ScrollView of simulated Credit Cards (HDFC Regalia, ICICI Amazon Pay, Amex)",
+        "Simulate cards using View + expo-linear-gradient + absolute positioned icons",
+        "Spend category breakdown (Grocery, Travel, Fuel, Dining) with recommended card for each",
+        "Net reward yield metric"
+      ]
+    },
+    "TaxSavingPredictor": {
+      "elements": [
+        "FY 2026-27 tag",
+        "Toggle: New vs Old Regime",
+        "Visual bars comparing tax liability",
+        "Alert Box: 'Invest ₹1.5L in ELSS to save ₹31,200' with red to green transition"
+      ]
+    },
+    "PaywallModal": {
+      "trigger": "Bottom Sheet or Full Screen Modal",
+      "design": {
+        "background": "Deep Navy with subtle glow at the bottom",
+        "headline": "Stop the leak.",
+        "subheadline": "Pays for itself in 1 day.",
+        "pricing_options": [
+          {"tier": "Monthly", "price": "₹99/mo"},
+          {"tier": "Yearly", "price": "₹899/yr", "badge": "Best Value"}
+        ],
+        "cta": "Unlock Dashboard"
+      }
+    }
+  },
+  "assets_and_icons": {
+    "icon_library": "@expo/vector-icons (Ionicons or Phosphor Native)",
+    "usage": "Use vector icons for categories. E.g., 'airplane' for travel, 'cart' for grocery, 'car' for fuel.",
+    "card_logos": "Use text-based logos (e.g., 'HDFC', 'SBI') styled nicely with typography, no need for actual image assets as they degrade app performance and premium feel."
+  },
+  "instructions_to_main_agent": [
+    "TECH STACK: React Native (Expo), React Navigation, @react-native-community/slider, expo-linear-gradient, react-native-svg.",
+    "STYLING: Use standard React Native StyleSheet. Do NOT use HTML/Tailwind classes (div, span). Use View, Text, ScrollView.",
+    "FONTS: Install @expo-google-fonts/outfit and @expo-google-fonts/manrope. If not possible, use system fonts but maintain heavy contrast between headings (Bold/Black) and body (Regular).",
+    "TESTING: Add testID='...' (React Native equivalent of data-testid) to all interactive elements, buttons, inputs, and major sections.",
+    "LAYOUT RULE: Never center everything. Use left-aligned typography for data and charts. Center only the Paywall headline and CTAs.",
+    "COLORS: Stick strictly to the Archetype 5 palette defined in this JSON. No default pure black or gray.",
+    "BORDERS: Containers with borders must have generous padding (min 16px, preferably 24px).",
+    "PERFORMANCE: Use native driver for animations (e.g., Pulse effect on Leakage meter).",
+    "ICONS: Use @expo/vector-icons. Keep sizes consistent."
+  ]
+}
