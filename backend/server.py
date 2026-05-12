@@ -42,6 +42,8 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 RAZORPAY_KEY_ID = os.environ["RAZORPAY_KEY_ID"]
 RAZORPAY_KEY_SECRET = os.environ["RAZORPAY_KEY_SECRET"]
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@paisabachao.com").lower()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin@123")
 
 rzp = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -473,9 +475,12 @@ async def login(body: LoginRequest):
     doc = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
     if not doc or not doc.get("password_hash") or not verify_password(body.password, doc["password_hash"]):
         raise HTTPException(status_code=401, detail="invalid email or password")
-    return {"token": make_jwt(doc["user_id"]),
-            "user": {"user_id": doc["user_id"], "email": doc["email"], "name": doc["name"],
-                     "auth_provider": doc["auth_provider"], "picture": doc.get("picture")}}
+    user_obj = {"user_id": doc["user_id"], "email": doc["email"], "name": doc["name"],
+                "auth_provider": doc["auth_provider"], "picture": doc.get("picture")}
+    if doc.get("is_admin"):
+        user_obj["subscription"] = _admin_sub()
+        user_obj["is_admin"] = True
+    return {"token": make_jwt(doc["user_id"]), "user": user_obj}
 
 @api_router.post("/auth/google/session")
 async def google_session(body: GoogleSessionRequest, response: Response):
@@ -509,12 +514,33 @@ async def google_session(body: GoogleSessionRequest, response: Response):
             "user": {"user_id": uid, "email": email, "name": data.get("name"),
                      "picture": data.get("picture"), "auth_provider": "google"}}
 
+def _admin_sub() -> dict:
+    """Synthetic premium subscription for admin/test accounts.
+    Never expires; ensures every paywalled feature is unlocked for QA."""
+    return {
+        "plan": "admin",
+        "active": True,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=3650),
+        "source": "admin_seed",
+    }
+
+
+def _decorate_user(doc: dict) -> dict:
+    """Strip sensitive fields and auto-promote admins to active premium."""
+    if not doc:
+        return doc
+    doc.pop("password_hash", None)
+    if doc.get("is_admin"):
+        doc["subscription"] = _admin_sub()
+    return doc
+
+
 @api_router.get("/auth/me")
 async def me(user_id: str = Depends(get_current_user_id)):
     doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="user not found")
-    return doc
+    return _decorate_user(doc)
 
 @api_router.post("/auth/logout")
 async def logout(request: Request, response: Response,
@@ -846,6 +872,30 @@ async def startup_init():
         await _load_cards()
     except Exception:
         logger.exception("seed failed")
+    # Seed the built-in admin/QA user with permanent premium access.
+    try:
+        existing = await db.users.find_one({"email": ADMIN_EMAIL}, {"_id": 0})
+        if not existing:
+            await db.users.insert_one({
+                "user_id": new_user_id(),
+                "email": ADMIN_EMAIL,
+                "name": "PaisaBachao Admin",
+                "password_hash": hash_password(ADMIN_PASSWORD),
+                "auth_provider": "password",
+                "picture": None,
+                "subscription": None,
+                "is_admin": True,
+                "created_at": datetime.now(timezone.utc),
+            })
+            logger.info(f"Seeded admin user: {ADMIN_EMAIL}")
+        else:
+            # Ensure existing record is marked admin (idempotent) and password matches env.
+            await db.users.update_one(
+                {"email": ADMIN_EMAIL},
+                {"$set": {"is_admin": True, "password_hash": hash_password(ADMIN_PASSWORD)}},
+            )
+    except Exception:
+        logger.exception("admin seed failed")
     asyncio.create_task(_refresh_loop())
 
 
