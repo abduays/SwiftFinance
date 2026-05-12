@@ -6,6 +6,7 @@ import os
 import logging
 import hmac
 import hashlib
+import json
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -117,6 +118,17 @@ class PaymentVerifyRequest(BaseModel):
 
 class GoogleSessionRequest(BaseModel):
     session_id: str
+
+class LeakageSnapshot(BaseModel):
+    monthly_leakage: float
+    annual_leakage: float
+    breakdown: dict
+    annual_income: float
+    loans_count: int
+
+class WhatsAppPrefs(BaseModel):
+    enabled: bool
+    phone: Optional[str] = None  # E.164 e.g. +91xxxxxxxxxx
 
 # ---------- Helpers ----------
 def emi(principal, rate, months):
@@ -469,6 +481,140 @@ async def verify_payment(body: PaymentVerifyRequest,
         {"$set": {"subscription": {"plan": plan, "expires_at": expires, "active": True}}},
     )
     return {"ok": True, "plan": plan, "expires_at": expires.isoformat()}
+
+
+# ---------- Razorpay Webhook ----------
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", RAZORPAY_KEY_SECRET)
+
+@api_router.post("/payments/webhook")
+async def razorpay_webhook(request: Request):
+    """Razorpay posts async settlement events here. Configure URL in Razorpay
+    dashboard → Webhooks. Verifies X-Razorpay-Signature against shared secret."""
+    raw = await request.body()
+    sig = request.headers.get("x-razorpay-signature", "")
+    expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        raise HTTPException(status_code=400, detail="bad signature")
+    try:
+        evt = json.loads(raw.decode())
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad payload")
+
+    event = evt.get("event", "")
+    payload = evt.get("payload", {})
+    payment = payload.get("payment", {}).get("entity", {})
+    order_id = payment.get("order_id")
+
+    # store every event for auditability
+    await db.webhook_events.insert_one({
+        "event": event,
+        "payment_id": payment.get("id"),
+        "order_id": order_id,
+        "amount": payment.get("amount"),
+        "status": payment.get("status"),
+        "method": payment.get("method"),
+        "received_at": datetime.now(timezone.utc),
+    })
+
+    if event == "payment.captured" and order_id:
+        order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        if order:
+            plan = order.get("plan", "monthly")
+            expires = datetime.now(timezone.utc) + timedelta(days=365 if plan == "yearly" else 30)
+            await db.orders.update_one(
+                {"order_id": order_id},
+                {"$set": {"status": "captured", "payment_id": payment.get("id"),
+                          "captured_at": datetime.now(timezone.utc)}},
+            )
+            await db.users.update_one(
+                {"user_id": order["user_id"]},
+                {"$set": {"subscription": {"plan": plan, "expires_at": expires, "active": True}}},
+            )
+            # Queue a WhatsApp notification for premium activation
+            await _queue_whatsapp(order["user_id"], "subscription_active",
+                                  f"🎉 LeakStop Premium is now active. Plan: {plan.upper()}. We'll WhatsApp your next leakage audit on the quarterly check-in.")
+    elif event == "payment.failed" and order_id:
+        await db.orders.update_one(
+            {"order_id": order_id},
+            {"$set": {"status": "failed", "failure_reason": payment.get("error_description")}},
+        )
+
+    return {"ok": True, "event": event}
+
+
+# ---------- Leakage History (Timeline) ----------
+@api_router.post("/me/leakage-history")
+async def add_history(snap: LeakageSnapshot,
+                      user_id: str = Depends(get_current_user_id)):
+    doc = snap.dict()
+    doc["user_id"] = user_id
+    doc["created_at"] = datetime.now(timezone.utc)
+    await db.leakage_history.insert_one(doc)
+    return {"ok": True}
+
+
+@api_router.get("/me/leakage-history")
+async def get_history(user_id: str = Depends(get_current_user_id)):
+    docs = await db.leakage_history.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return docs
+
+
+# ---------- WhatsApp (mock, ready for Twilio/Meta plug-in) ----------
+WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "mock")
+
+async def _queue_whatsapp(user_id: str, kind: str, message: str):
+    user = await db.users.find_one({"user_id": user_id},
+                                   {"_id": 0, "whatsapp_prefs": 1, "name": 1})
+    prefs = (user or {}).get("whatsapp_prefs") or {}
+    if not prefs.get("enabled") or not prefs.get("phone"):
+        return False
+
+    queued = {
+        "user_id": user_id,
+        "to": prefs["phone"],
+        "kind": kind,
+        "message": message,
+        "provider": WHATSAPP_PROVIDER,
+        "status": "queued",
+        "created_at": datetime.now(timezone.utc),
+    }
+    # Plug Twilio/Meta here when keys are available — see /app/auth_testing.md style notes.
+    if WHATSAPP_PROVIDER == "mock":
+        queued["status"] = "sent"
+        queued["sent_at"] = datetime.now(timezone.utc)
+
+    await db.whatsapp_outbox.insert_one(queued)
+    return True
+
+
+@api_router.post("/me/whatsapp")
+async def set_whatsapp(prefs: WhatsAppPrefs,
+                       user_id: str = Depends(get_current_user_id)):
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"whatsapp_prefs": prefs.dict()}},
+    )
+    if prefs.enabled and prefs.phone:
+        await _queue_whatsapp(user_id, "welcome",
+                              "Welcome to LeakStop on WhatsApp! 🟢 We'll ping you every quarter with your wealth-audit summary.")
+    return {"ok": True}
+
+
+@api_router.get("/me/whatsapp")
+async def get_whatsapp(user_id: str = Depends(get_current_user_id)):
+    user = await db.users.find_one({"user_id": user_id},
+                                   {"_id": 0, "whatsapp_prefs": 1})
+    return (user or {}).get("whatsapp_prefs") or {"enabled": False, "phone": None}
+
+
+@api_router.get("/me/whatsapp/outbox")
+async def whatsapp_outbox(user_id: str = Depends(get_current_user_id)):
+    docs = await db.whatsapp_outbox.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return docs
 
 
 # ---------- Wiring ----------

@@ -16,12 +16,15 @@ import { useAppStore, store } from "../src/store";
 import { api, formatINR, formatLakhs } from "../src/api";
 import LeakageMeter from "../src/components/LeakageMeter";
 import ModuleCard from "../src/components/ModuleCard";
-import { useAuth } from "../src/auth";
+import { useAuth, authedFetch } from "../src/auth";
 import { schedulePeriodicAudits, ensureNotificationsPermission } from "../src/notifications";
+import { useLang } from "../src/translations";
+import { appendSnapshot } from "../src/storage";
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
+  const { t } = useLang();
   const monthly = useAppStore((s) => s.monthly_leakage);
   const annual = useAppStore((s) => s.annual_leakage);
   const income = useAppStore((s) => s.annual_income);
@@ -36,9 +39,26 @@ export default function Dashboard() {
         investments_80d: store.get().investments_80d,
         investments_nps: store.get().investments_nps,
       })
-      .then((res) => store.set({ monthly_leakage: res.monthly_leakage, annual_leakage: res.annual_leakage }))
+      .then(async (res) => {
+        store.set({ monthly_leakage: res.monthly_leakage, annual_leakage: res.annual_leakage });
+        // Persist snapshot locally + backend (best-effort)
+        const snap = {
+          monthly_leakage: res.monthly_leakage,
+          annual_leakage: res.annual_leakage,
+          breakdown: res.breakdown,
+          annual_income: income,
+          loans_count: loans.length,
+        };
+        await appendSnapshot(snap);
+        if (token) {
+          authedFetch("/me/leakage-history", {
+            method: "POST",
+            body: JSON.stringify(snap),
+          }, token).catch(() => {});
+        }
+      })
       .catch(() => {});
-  }, [income, loans]);
+  }, [income, loans, token]);
 
   useEffect(() => {
     // Schedule quarterly audit notifications (mobile only)
@@ -48,41 +68,7 @@ export default function Dashboard() {
   const isPremium = !!user?.subscription?.active;
 
   const onProfilePress = () => {
-    Alert.alert(
-      user?.name ?? "Account",
-      `${user?.email ?? ""}\n${isPremium ? "★ Premium subscriber" : "Free plan"}`,
-      [
-        {
-          text: "Enable reminders",
-          onPress: async () => {
-            const ok = await ensureNotificationsPermission();
-            if (Platform.OS === "web") {
-              Alert.alert("Heads up", "Push reminders work on the installed mobile app, not web preview.");
-            } else if (ok) {
-              await schedulePeriodicAudits();
-              Alert.alert("Done", "Quarterly leakage audits scheduled.");
-            }
-          },
-        },
-        {
-          text: "Reset onboarding",
-          onPress: () => {
-            store.reset();
-            router.replace("/onboarding");
-          },
-        },
-        {
-          text: "Sign out",
-          style: "destructive",
-          onPress: async () => {
-            await logout();
-            store.reset();
-            router.replace("/auth");
-          },
-        },
-        { text: "Cancel", style: "cancel" },
-      ]
-    );
+    router.push("/settings");
   };
 
   return (
@@ -93,7 +79,7 @@ export default function Dashboard() {
             Leak<Text style={{ color: COLORS.primary }}>Stop</Text>
           </Text>
           <Text style={styles.muted}>
-            {user ? `Hi ${user.name.split(" ")[0]}` : "Your wealth audit"} · LIVE
+            {user ? `${t("dashboard_hi")} ${user.name.split(" ")[0]}` : t("dashboard_subtitle")} · {t("dashboard_live")}
           </Text>
         </View>
         <TouchableOpacity style={styles.profileBtn} onPress={onProfilePress} testID="profile-btn">
@@ -107,14 +93,14 @@ export default function Dashboard() {
 
         <View style={styles.statRow}>
           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>INCOME</Text>
+            <Text style={styles.statLabel}>{t("income")}</Text>
             <Text style={styles.statValue}>{formatLakhs(income)}</Text>
-            <Text style={styles.statSub}>/ year gross</Text>
+            <Text style={styles.statSub}>{t("per_year")}</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>DEBTS TRACKED</Text>
+            <Text style={styles.statLabel}>{t("debts_tracked")}</Text>
             <Text style={styles.statValue}>{loans.length}</Text>
-            <Text style={styles.statSub}>{loans.map((l) => l.loan_type).join(", ") || "none"}</Text>
+            <Text style={styles.statSub}>{loans.map((l) => l.loan_type).join(", ") || t("none")}</Text>
           </View>
         </View>
 
@@ -129,23 +115,21 @@ export default function Dashboard() {
             <Ionicons name="sparkles" size={22} color={COLORS.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.advisorTitle}>Ask the AI Advisor</Text>
-            <Text style={styles.advisorSub}>
-              Claude 4.5 + Gemini 3 · in हिन्दी, தமிழ், বাংলা & more
-            </Text>
+            <Text style={styles.advisorTitle}>{t("advisor_title")}</Text>
+            <Text style={styles.advisorSub}>{t("advisor_sub")}</Text>
           </View>
           <Ionicons name="arrow-forward" size={20} color={COLORS.text_primary} />
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Money-Making Modules</Text>
-        <Text style={styles.sectionSub}>Tap a card to fix the leak.</Text>
+        <Text style={styles.sectionTitle}>{t("money_modules")}</Text>
+        <Text style={styles.sectionSub}>{t("money_modules_sub")}</Text>
 
         <ModuleCard
           testID="module-loan"
           icon="cash"
           badge="MODULE A · DEBT HACK"
-          title="Loan Arbitrage Engine"
-          description="See how much you save by refinancing at today's best market rate."
+          title={t("module_loan")}
+          description={t("module_loan_desc")}
           metric={loans.length > 0 ? "Save up to 8.5L" : "Add loan"}
           metricLabel="LIFETIME SAVINGS"
           to="/loan"
@@ -155,8 +139,8 @@ export default function Dashboard() {
           testID="module-cards"
           icon="card"
           badge="MODULE B · REWARD STACK"
-          title="Credit Card Optimizer"
-          description="Rank Indian cards by reward % for your spend category."
+          title={t("module_cards")}
+          description={t("module_cards_desc")}
           metric="+ ₹14,400/yr"
           metricLabel="MAX CASHBACK"
           to="/cards"
@@ -166,8 +150,8 @@ export default function Dashboard() {
           testID="module-tax"
           icon="document-text"
           badge="MODULE C · FY 2026-27"
-          title="Tax-Saving Predictor"
-          description="Pick the right regime. Plug ELSS gaps before March 31."
+          title={t("module_tax")}
+          description={t("module_tax_desc")}
           metric={formatINR(Math.max(annual * 0.4, 31200))}
           metricLabel="UNLOCK INSTANTLY"
           metricColor={COLORS.gold}
@@ -178,9 +162,9 @@ export default function Dashboard() {
           <View style={styles.premiumCard} testID="premium-active">
             <Ionicons name="diamond" size={22} color={COLORS.gold} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.premiumTitle}>Premium Active</Text>
+              <Text style={styles.premiumTitle}>{t("premium_active")}</Text>
               <Text style={styles.premiumSub}>
-                Plan: {user?.subscription?.plan?.toUpperCase()} · Enjoy unlimited audits.
+                Plan: {user?.subscription?.plan?.toUpperCase()}
               </Text>
             </View>
           </View>
@@ -188,17 +172,15 @@ export default function Dashboard() {
           <View style={styles.footerCard} testID="footer-promo">
             <Ionicons name="rocket" size={22} color={COLORS.gold} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.footerTitle}>Upgrade to Premium</Text>
-              <Text style={styles.footerSub}>
-                Detailed loan-switch plan + quarterly audits at ₹75/mo.
-              </Text>
+              <Text style={styles.footerTitle}>{t("upgrade_title")}</Text>
+              <Text style={styles.footerSub}>{t("upgrade_sub")}</Text>
             </View>
             <TouchableOpacity
               style={styles.footerCta}
               onPress={() => router.push("/loan")}
               testID="footer-cta"
             >
-              <Text style={styles.footerCtaText}>Unlock</Text>
+              <Text style={styles.footerCtaText}>{t("unlock")}</Text>
             </TouchableOpacity>
           </View>
         )}
