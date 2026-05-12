@@ -98,6 +98,86 @@
 
 
 
+  - task: "DB-backed market rates + cards with weekly RBI refresh & admin endpoints"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Moved MARKET_BEST_RATES + CREDIT_CARDS to MongoDB collections
+          (market_data, card_catalog) with seed-on-empty defaults. Added admin
+          endpoints + weekly RBI refresh. Live RBI fetch verified
+          (repo=5.25 % → home=7.65, car=8.05, personal=10.25).
+      - working: true
+        agent: "testing"
+        comment: |
+          All 46 backend checks PASS via /app/backend_test.py against the
+          public EXPO_PUBLIC_BACKEND_URL/api.
+
+          NEW admin/config endpoints (12 checks):
+          * GET /api/market-rates — schema {rates, repo_rate, spreads, source,
+            last_updated_at, last_checked_at}; rates derived from repo+spreads
+            within 0.01 (home=7.65, car=8.05, personal=10.25, repo=5.25,
+            source=rbi_press_release).
+          * GET /api/cards — 6 cards loaded from DB with full schema
+            (id, name, issuer, color, annual_fee, rewards{grocery,travel,fuel,
+            dining}, highlight).
+          * POST /admin/market-rates with X-Admin-Token + {repo_rate:6.5}
+            → 200, source=admin_manual, rates derived (home=8.9 etc.).
+          * GET /market-rates reflects update.
+          * POST /admin/market-rates without header → 401.
+          * repo_rate=13 → 400 (out of band 2–12).
+          * spreads={"home":2.5} only → 400 (spreads.car required).
+          * POST /admin/market-rates/refresh-now with token → 200, source
+            =rbi_press_release; live fetch reachable, no crash.
+          * POST /admin/cards upsert qa_test_card → 200; GET /cards now lists
+            7 cards including qa_test_card.
+          * Upsert with rewards missing 'fuel' → 400 (rewards.fuel required).
+          * DELETE /admin/cards/qa_test_card with token → 200, deleted=1;
+            GET /cards back to 6 without qa_test_card.
+          * DELETE without token → 401.
+
+          REGRESSION (still all green):
+          * POST /api/leakage (income=12L + home loan 35L@9.2) now includes
+            rates_source=rbi_press_release and rates_last_updated_at ISO ts;
+            breakdown={loans_monthly:3424.36, tax_monthly:13650.0,
+            cards_monthly:400.0}, totals reconcile within tolerance.
+          * POST /api/loan/refinance home 35L@9.2 240mo → switched.rate=7.65
+            equals live /market-rates.rates.home; lifetime_save=₹8.22L,
+            months_saved=67.
+          * POST /api/cards/rank (grocery/travel/fuel/dining) sorted desc by
+            annual_net_value with full schema (top grocery: ICICI Amazon Pay
+            ₹9000/yr).
+          * Auth register/login/me + bad-password 401 + duplicate 409.
+          * Advisor: claude-sonnet-4-5/hi (1334 chars), gemini-3-flash/en
+            (2734 chars) both 200.
+          * Razorpay order monthly=9900, yearly=89900, invalid plan 400,
+            verify bogus sig 400, webhook bogus sig 400.
+          * /me/leakage-history, /me/whatsapp prefs + outbox welcome
+            (status=sent, provider=mock).
+
+          E2E ADMIN SCENARIO:
+          * Save baseline (repo=5.25, src=rbi_press_release).
+          * Override repo to 7.25 → admin_manual, rates home=9.65, car=10.05,
+            personal=12.25.
+          * /loan/refinance home → switched.rate=9.65 = 7.25 + spread.home(2.4)
+            ✓.
+          * Best-effort refresh-now restored RBI value (5.25); also manually
+            posted baseline repo for determinism.
+
+          STRESS: 20× /api/leakage with random incomes 5L–50L → all 200,
+          finite monthly_leakage & cards_monthly, rates_source present every
+          time.
+
+          Updated /app/memory/test_credentials.md with fresh qa_admin user
+          (qa_admin_5e3712c1@paisabachao.in / Qa!Admin#2026). Backend is
+          fully regression-clean and admin/config layer is production-ready.
+
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
@@ -255,3 +335,30 @@ agent_communication:
       with incomes 5L–50L all return 200 with finite numbers. Updated
       /app/memory/test_credentials.md with the freshly-registered qa_stress_*@paisabachao.in
       user. No regressions or stuck tasks. Backend is ready.
+  - agent: "testing"
+    message: |
+      v2.2 — DB-backed market rates + cards + admin endpoints regression complete.
+      46/46 PASS via /app/backend_test.py against EXPO_PUBLIC_BACKEND_URL/api.
+
+      New (12): GET /market-rates schema {rates, repo_rate, spreads, source,
+      last_updated_at, last_checked_at} + derivation within 0.01; GET /cards
+      ≥6 with full schema; POST /admin/market-rates (200/admin_manual/401/400
+      out-of-band/400 missing spreads); POST /admin/market-rates/refresh-now
+      (200, source=rbi_press_release — RBI reachable from this env);
+      POST/DELETE /admin/cards (upsert qa_test_card, 400 missing rewards.fuel,
+      delete 200/deleted=1, no-token 401).
+
+      Regression intact: /api/leakage now stamps rates_source +
+      rates_last_updated_at on every response; /loan/refinance switched.rate
+      matches live home rate; cards/rank still sorted with proper schema;
+      auth/advisor/Razorpay/me-scoped all green.
+
+      E2E admin: override repo→7.25 → derived rates home=9.65, car=10.05,
+      personal=12.25 → /loan/refinance switched=9.65; restored via
+      refresh-now (RBI snap 5.25) and manual baseline post.
+
+      20× /api/leakage stress (incomes 5L–50L) all 200 with finite numbers and
+      rates_source field present.
+
+      Updated /app/memory/test_credentials.md with fresh qa_admin user. No
+      regressions, no stuck tasks. Backend ready.

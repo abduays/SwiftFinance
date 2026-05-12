@@ -13,7 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { COLORS, RADIUS, SPACING } from "../src/theme";
 import { useAppStore, store } from "../src/store";
-import { api, formatINR, formatLakhs } from "../src/api";
+import { api, formatINR, formatLakhs, formatRelTime } from "../src/api";
 import LeakageMeter from "../src/components/LeakageMeter";
 import ModuleCard from "../src/components/ModuleCard";
 import PaywallModal from "../src/components/PaywallModal";
@@ -32,6 +32,13 @@ export default function Dashboard() {
   const loans = useAppStore((s) => s.loans);
   const breakdown = useAppStore((s) => s.breakdown);
   const [paywall, setPaywall] = useState(false);
+  const [ratesMeta, setRatesMeta] = useState<{ source: string; last_updated_at: string | null; repo_rate: number } | null>(null);
+
+  useEffect(() => {
+    api.marketRates().then((m) => {
+      setRatesMeta({ source: m.source, last_updated_at: m.last_updated_at, repo_rate: m.repo_rate });
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api
@@ -112,6 +119,15 @@ export default function Dashboard() {
 
       <ScrollView contentContainerStyle={styles.scroll} testID="dashboard-scroll">
         <LeakageMeter monthly={monthly} annual={annual} />
+
+        {ratesMeta && (
+          <View style={styles.ratesBadge} testID="rates-badge">
+            <Ionicons name="cellular" size={12} color={COLORS.primary} />
+            <Text style={styles.ratesBadgeText}>
+              RBI repo {ratesMeta.repo_rate}% · {ratesMeta.source === "rbi_press_release" ? "Live from RBI" : ratesMeta.source === "admin_manual" ? "Admin-set" : "Default snapshot"} · {formatRelTime(ratesMeta.last_updated_at)}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.statRow}>
           <View style={styles.statBox}>
@@ -237,6 +253,21 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
+  ratesBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(46,213,115,0.08)",
+    borderColor: "rgba(46,213,115,0.25)",
+    borderWidth: 1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: RADIUS.md,
+    alignSelf: "flex-start",
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  ratesBadgeText: { color: COLORS.text_secondary, fontSize: 11, fontWeight: "600" },
   statRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
   statBox: {
     flex: 1,

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Header, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -15,6 +15,9 @@ from datetime import datetime, timezone, timedelta
 
 import razorpay
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+import asyncio
+import re
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -38,6 +41,7 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 RAZORPAY_KEY_ID = os.environ["RAZORPAY_KEY_ID"]
 RAZORPAY_KEY_SECRET = os.environ["RAZORPAY_KEY_SECRET"]
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 rzp = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -45,11 +49,17 @@ app = FastAPI()
 app.state.db = db
 api_router = APIRouter(prefix="/api")
 
-# ---------- Market Rates ----------
-MARKET_BEST_RATES = {"home": 8.4, "car": 8.8, "personal": 11.0}
+# ---------- Defaults (seed-on-empty) ----------
+DEFAULT_REPO_RATE = 6.00  # RBI repo rate snapshot (June 2025)
+DEFAULT_SPREADS = {"home": 2.40, "car": 2.80, "personal": 5.00}
 
-# ---------- Credit Card Catalog ----------
-CREDIT_CARDS = [
+def _rates_from_repo(repo: float, spreads: dict) -> dict:
+    return {k: round(repo + v, 2) for k, v in spreads.items()}
+
+MARKET_BEST_RATES = _rates_from_repo(DEFAULT_REPO_RATE, DEFAULT_SPREADS)
+CREDIT_CARDS: list = []
+
+DEFAULT_CARDS = [
     {"id": "hdfc_regalia", "name": "HDFC Regalia Gold", "issuer": "HDFC", "color": "#1B3A6B", "annual_fee": 2500,
      "rewards": {"grocery": 1.33, "travel": 4.0, "fuel": 1.0, "dining": 5.0},
      "highlight": "5x points on dining & travel via SmartBuy"},
@@ -69,6 +79,116 @@ CREDIT_CARDS = [
      "rewards": {"grocery": 2.5, "travel": 1.0, "fuel": 1.0, "dining": 2.5},
      "highlight": "5% cashback on Swiggy, Zomato, Amazon, Flipkart"},
 ]
+
+# ---------- Market Data Service (DB + background refresh) ----------
+async def _load_market_data() -> dict:
+    """Read current market data from DB; seed defaults on first run."""
+    doc = await db.market_data.find_one({"_id": "rates"}, {"_id": 0})
+    if not doc:
+        doc = {
+            "repo_rate": DEFAULT_REPO_RATE,
+            "spreads": DEFAULT_SPREADS,
+            "rates": _rates_from_repo(DEFAULT_REPO_RATE, DEFAULT_SPREADS),
+            "source": "seed_defaults",
+            "last_updated_at": datetime.now(timezone.utc),
+        }
+        await db.market_data.insert_one({"_id": "rates", **doc})
+    return doc
+
+
+async def _save_market_data(repo_rate: float, spreads: dict, source: str) -> dict:
+    rates = _rates_from_repo(repo_rate, spreads)
+    payload = {
+        "repo_rate": round(repo_rate, 2),
+        "spreads": spreads,
+        "rates": rates,
+        "source": source,
+        "last_updated_at": datetime.now(timezone.utc),
+    }
+    await db.market_data.update_one({"_id": "rates"}, {"$set": payload}, upsert=True)
+    global MARKET_BEST_RATES
+    MARKET_BEST_RATES = rates
+    return payload
+
+
+async def _load_cards() -> list:
+    docs = await db.card_catalog.find({}, {"_id": 0}).to_list(200)
+    if not docs:
+        for c in DEFAULT_CARDS:
+            await db.card_catalog.insert_one({**c, "updated_at": datetime.now(timezone.utc)})
+        docs = await db.card_catalog.find({}, {"_id": 0}).to_list(200)
+    return docs
+
+
+# RBI public press-release page (HTML). We pull plain text and regex the
+# latest repo rate. If RBI changes the markup, this gracefully fails and the
+# previous DB value is retained. Source disclosed via /api/market-rates.
+RBI_PRESS_URLS = [
+    # Primary: current monetary policy page
+    "https://www.rbi.org.in/Scripts/BS_PressReleaseDisplay.aspx",
+    # Fallback: home page often lists current rates in the side ticker
+    "https://www.rbi.org.in/",
+]
+_REPO_REGEXES = [
+    re.compile(r"policy\s*repo\s*rate[^0-9]{0,60}(\d\.\d{1,2})\s*%", re.IGNORECASE | re.DOTALL),
+    re.compile(r"repo\s*rate[^0-9]{0,40}(\d\.\d{1,2})\s*per\s*cent", re.IGNORECASE | re.DOTALL),
+    re.compile(r"repo\s*rate[^0-9]{0,40}(\d\.\d{1,2})\s*%", re.IGNORECASE | re.DOTALL),
+]
+
+async def _fetch_repo_rate_from_rbi() -> Optional[float]:
+    headers = {"User-Agent": "Mozilla/5.0 (PaisaBachao/1.0)"}
+    try:
+        async with httpx.AsyncClient(timeout=12, headers=headers, follow_redirects=True) as c:
+            for url in RBI_PRESS_URLS:
+                try:
+                    r = await c.get(url)
+                    if r.status_code != 200:
+                        continue
+                    text = re.sub(r"<[^>]+>", " ", r.text)
+                    text = re.sub(r"\s+", " ", text)
+                    for rgx in _REPO_REGEXES:
+                        m = rgx.search(text)
+                        if m:
+                            val = float(m.group(1))
+                            if 2.0 <= val <= 12.0:
+                                return val
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return None
+
+
+async def _refresh_market_rates_once() -> dict:
+    """Best-effort weekly refresh. Returns the new doc (or unchanged on failure)."""
+    rate = await _fetch_repo_rate_from_rbi()
+    current = await _load_market_data()
+    if rate is None:
+        # No update: bump only the timestamp's last_checked
+        await db.market_data.update_one(
+            {"_id": "rates"},
+            {"$set": {"last_checked_at": datetime.now(timezone.utc),
+                      "last_check_status": "rbi_unreachable"}},
+        )
+        return current
+    if abs(rate - current.get("repo_rate", -1)) < 0.005:
+        await db.market_data.update_one(
+            {"_id": "rates"},
+            {"$set": {"last_checked_at": datetime.now(timezone.utc),
+                      "last_check_status": "no_change"}},
+        )
+        return current
+    return await _save_market_data(rate, current.get("spreads", DEFAULT_SPREADS), source="rbi_press_release")
+
+
+async def _refresh_loop():
+    while True:
+        try:
+            await _refresh_market_rates_once()
+        except Exception:
+            logger.exception("market rate refresh loop error")
+        await asyncio.sleep(7 * 24 * 3600)  # weekly
+
 
 # ---------- Models ----------
 class LoanInput(BaseModel):
@@ -195,19 +315,29 @@ async def root():
 
 @api_router.get("/market-rates")
 async def market_rates():
-    return MARKET_BEST_RATES
+    doc = await _load_market_data()
+    return {
+        "rates": doc["rates"],
+        "repo_rate": doc["repo_rate"],
+        "spreads": doc["spreads"],
+        "source": doc.get("source", "seed_defaults"),
+        "last_updated_at": doc.get("last_updated_at").isoformat() if doc.get("last_updated_at") else None,
+        "last_checked_at": doc.get("last_checked_at").isoformat() if doc.get("last_checked_at") else None,
+    }
 
 @api_router.get("/cards")
 async def list_cards():
-    return CREDIT_CARDS
+    docs = await _load_cards()
+    return docs
 
 @api_router.post("/cards/rank")
 async def rank_cards(req: CardRankRequest):
     cat = req.category.lower()
     if cat not in {"grocery", "travel", "fuel", "dining"}:
         raise HTTPException(status_code=400, detail="invalid category")
+    cards = await _load_cards()
     out = []
-    for c in CREDIT_CARDS:
+    for c in cards:
         pct = c["rewards"].get(cat, 0)
         mb = req.monthly_spend * pct / 100
         out.append({"id": c["id"], "name": c["name"], "issuer": c["issuer"], "color": c["color"],
@@ -220,9 +350,11 @@ async def rank_cards(req: CardRankRequest):
 @api_router.post("/loan/refinance")
 async def loan_refinance(req: RefinanceRequest):
     lt = req.loan_type.lower()
-    if lt not in MARKET_BEST_RATES:
+    doc = await _load_market_data()
+    rates = doc["rates"]
+    if lt not in rates:
         raise HTTPException(status_code=400, detail="invalid loan_type")
-    best = MARKET_BEST_RATES[lt]
+    best = rates[lt]
     cur_emi = emi(req.amount, req.rate, req.tenure_months)
     new_emi = emi(req.amount, best, req.tenure_months)
     cti = total_interest(req.amount, req.rate, req.tenure_months)
@@ -260,12 +392,15 @@ async def tax_calculate(req: TaxRequest):
 
 @api_router.post("/leakage")
 async def compute_leakage(p: ProfileCreate):
+    doc = await _load_market_data()
+    rates = doc["rates"]
+    cards = await _load_cards()
     loan_leak = 0.0
     for ln in p.loans:
         lt = ln.loan_type.lower()
-        if lt in MARKET_BEST_RATES:
+        if lt in rates:
             cur = emi(ln.amount, ln.rate, ln.tenure_months)
-            best = emi(ln.amount, MARKET_BEST_RATES[lt], ln.tenure_months)
+            best = emi(ln.amount, rates[lt], ln.tenure_months)
             loan_leak += max(cur - best, 0)
     nt = tax_new_regime(p.annual_income)
     ot = tax_old_regime(p.annual_income, p.investments_80c, p.investments_80d, p.investments_nps)
@@ -277,7 +412,7 @@ async def compute_leakage(p: ProfileCreate):
     card_leak = 0.0
     if monthly_spend > 0:
         best_net = 0.0
-        for c in CREDIT_CARDS:
+        for c in cards:
             best_pct = max(c["rewards"].values())
             net_year = monthly_spend * best_pct / 100 * 12 - c["annual_fee"]
             best_net = max(best_net, net_year)
@@ -286,7 +421,9 @@ async def compute_leakage(p: ProfileCreate):
     return {"monthly_leakage": round(total, 2), "annual_leakage": round(total * 12, 2),
             "breakdown": {"loans_monthly": round(loan_leak, 2),
                           "tax_monthly": round(tax_leak_m, 2),
-                          "cards_monthly": round(card_leak, 2)}}
+                          "cards_monthly": round(card_leak, 2)},
+            "rates_source": doc.get("source", "seed_defaults"),
+            "rates_last_updated_at": doc.get("last_updated_at").isoformat() if doc.get("last_updated_at") else None}
 
 # Legacy unauth profile (for backward-compat)
 class Profile(BaseModel):
@@ -628,6 +765,71 @@ async def whatsapp_outbox(user_id: str = Depends(get_current_user_id)):
     return docs
 
 
+# ---------- Admin (rates + card catalog management) ----------
+class AdminRatesUpdate(BaseModel):
+    repo_rate: Optional[float] = None
+    spreads: Optional[dict] = None  # {"home": 2.4, "car": 2.8, "personal": 5.0}
+
+class AdminCardUpsert(BaseModel):
+    id: str
+    name: str
+    issuer: str
+    color: str = "#1B3A6B"
+    annual_fee: float = 0
+    rewards: dict
+    highlight: str = ""
+
+def _check_admin(token: Optional[str]):
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="admin token required")
+
+@api_router.post("/admin/market-rates")
+async def admin_set_rates(body: AdminRatesUpdate,
+                          x_admin_token: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_token)
+    current = await _load_market_data()
+    repo = body.repo_rate if body.repo_rate is not None else current["repo_rate"]
+    spreads = body.spreads if body.spreads is not None else current["spreads"]
+    if not (2.0 <= repo <= 12.0):
+        raise HTTPException(status_code=400, detail="repo_rate out of band (2–12)")
+    for k in ("home", "car", "personal"):
+        if k not in spreads:
+            raise HTTPException(status_code=400, detail=f"spreads.{k} required")
+        if not (0.0 <= spreads[k] <= 10.0):
+            raise HTTPException(status_code=400, detail=f"spreads.{k} out of band")
+    return await _save_market_data(repo, spreads, source="admin_manual")
+
+@api_router.post("/admin/market-rates/refresh-now")
+async def admin_refresh_now(x_admin_token: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_token)
+    doc = await _refresh_market_rates_once()
+    return {
+        "ok": True,
+        "rates": doc.get("rates"),
+        "source": doc.get("source"),
+        "last_updated_at": doc.get("last_updated_at").isoformat() if doc.get("last_updated_at") else None,
+    }
+
+@api_router.post("/admin/cards")
+async def admin_upsert_card(body: AdminCardUpsert,
+                            x_admin_token: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_token)
+    for k in ("grocery", "travel", "fuel", "dining"):
+        if k not in body.rewards:
+            raise HTTPException(status_code=400, detail=f"rewards.{k} required")
+    payload = body.dict()
+    payload["updated_at"] = datetime.now(timezone.utc)
+    await db.card_catalog.update_one({"id": body.id}, {"$set": payload}, upsert=True)
+    return {"ok": True, "id": body.id}
+
+@api_router.delete("/admin/cards/{card_id}")
+async def admin_delete_card(card_id: str,
+                            x_admin_token: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_token)
+    res = await db.card_catalog.delete_one({"id": card_id})
+    return {"ok": True, "deleted": res.deleted_count}
+
+
 # ---------- Wiring ----------
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"],
@@ -635,6 +837,17 @@ app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"],
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_init():
+    # Seed market data + card catalog if empty; kick off weekly refresh task.
+    try:
+        await _load_market_data()
+        await _load_cards()
+    except Exception:
+        logger.exception("seed failed")
+    asyncio.create_task(_refresh_loop())
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

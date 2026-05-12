@@ -24,7 +24,14 @@ export type LoanInput = {
 };
 
 export const api = {
-  marketRates: () => get<Record<string, number>>("/market-rates"),
+  marketRates: () => get<{
+    rates: Record<string, number>;
+    repo_rate: number;
+    spreads: Record<string, number>;
+    source: string;
+    last_updated_at: string | null;
+    last_checked_at: string | null;
+  }>("/market-rates"),
   listCards: () => get<any[]>("/cards"),
   rankCards: (category: string, monthly_spend: number) =>
     post<any[]>("/cards/rank", { category, monthly_spend }),
@@ -37,6 +44,22 @@ export const api = {
     investments_nps?: number;
   }) => post<any>("/tax/calculate", payload),
   leakage: (payload: any) => post<any>("/leakage", payload),
+};
+
+export const formatRelTime = (iso: string | null | undefined): string => {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const diff = Date.now() - t;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mon = Math.floor(day / 30);
+  return `${mon}mo ago`;
 };
 
 export const formatINR = (n: number) => {
