@@ -131,18 +131,17 @@ export default function Onboarding() {
         investments_nps: 0,
         monthly_leakage: leak.monthly_leakage,
         annual_leakage: leak.annual_leakage,
+        breakdown: leak.breakdown,
       });
       setProgress(1);
       setTimeout(() => router.replace("/dashboard"), 600);
     } catch (e) {
       console.warn("leakage failed", e);
-      // Fallback graceful path
+      // Fallback: persist inputs only — dashboard will retry computation.
       store.set({
         onboarded: true,
         annual_income: incomeNum,
         loans,
-        monthly_leakage: 9500,
-        annual_leakage: 114000,
       });
       setTimeout(() => router.replace("/dashboard"), 600);
     } finally {
@@ -352,11 +351,13 @@ export default function Onboarding() {
 
         {step < 2 && (
           <View style={styles.bottomBar}>
-            <View>
-              <Text style={styles.estLabel}>Estimated leakage</Text>
+            <View style={{ flex: 1, paddingRight: SPACING.md }}>
+              <Text style={styles.estLabel}>STEP {step + 1} OF 3</Text>
               <Text style={styles.estValue}>
-                {formatINR(Math.max(incomeNum * 0.01, 4500))}
-                <Text style={styles.estUnit}> / mo</Text>
+                {step === 0 ? "Income" : "Loans & rates"}
+                <Text style={styles.estUnit}>
+                  {step === 0 ? "  ·  Enter your gross salary" : "  ·  Add active EMIs"}
+                </Text>
               </Text>
             </View>
             <TouchableOpacity

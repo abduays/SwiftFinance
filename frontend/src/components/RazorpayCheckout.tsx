@@ -50,7 +50,7 @@ const buildHtml = (
           key: ${JSON.stringify(order.key_id)},
           amount: ${order.amount},
           currency: ${JSON.stringify(order.currency)},
-          name: "LeakStop",
+          name: "PaisaBachao",
           description: "Premium subscription · ${order.plan}",
           order_id: ${JSON.stringify(order.order_id)},
           theme: { color: "#10B981" },

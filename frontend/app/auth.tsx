@@ -94,7 +94,7 @@ export default function AuthScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.brandRow}>
             <Text style={styles.brand}>
-              Leak<Text style={{ color: COLORS.primary }}>Stop</Text>
+              Paisa<Text style={{ color: COLORS.primary }}>Bachao</Text>
             </Text>
           </View>
           <Text style={styles.eyebrow}>
@@ -217,7 +217,7 @@ export default function AuthScreen() {
           </Pressable>
 
           <Text style={styles.footer}>
-            By continuing you agree to LeakStop&apos;s Terms. Data stored encrypted.
+            By continuing you agree to PaisaBachao&apos;s Terms. Data stored encrypted.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

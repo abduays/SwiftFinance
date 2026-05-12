@@ -27,6 +27,8 @@ const en: T = {
   upgrade_sub: "Detailed loan-switch plan + quarterly audits at ₹75/mo.",
   unlock: "Unlock",
   premium_active: "Premium Active",
+  add_loan: "Add loan",
+  on_best_rate: "On best rate",
   // onboarding
   income_eyebrow: "INCOME PROFILE",
   income_q: "What's your annual income?",
@@ -75,6 +77,8 @@ const hi: T = {
   upgrade_sub: "Detailed loan-switch plan + quarterly audits — ₹75/मो",
   unlock: "Unlock",
   premium_active: "Premium चालू",
+  add_loan: "Loan जोड़ें",
+  on_best_rate: "Best rate पर",
   income_eyebrow: "आय का विवरण",
   income_q: "आपकी सालाना आय कितनी है?",
   income_help: "Tax leakage निकालने के लिए — आपके device पर ही रहेगा।",

@@ -29,11 +29,11 @@ function nextOccurrence(month: number, day: number, hour = 9): Date {
 }
 
 const AUDITS = [
-  { month: 6, day: 30, title: "Q1 Wealth Audit", body: "It's been 90 days. Run your LeakStop audit and stop fresh leaks." },
+  { month: 6, day: 30, title: "Q1 Wealth Audit", body: "It's been 90 days. Run your PaisaBachao audit and stop fresh leaks." },
   { month: 9, day: 30, title: "Q2 Wealth Audit", body: "Half-year check-in. See how much you've actually saved." },
   { month: 12, day: 31, title: "Q3 Wealth Audit", body: "Year-end is near. Plug remaining leaks before March 31." },
   { month: 3, day: 25, title: "FY-End Tax Deadline", body: "Only 6 days left to invest in ELSS / NPS / 80C. Don't lose ₹46,800." },
-  { month: 3, day: 31, title: "Last day of FY", body: "Today is the deadline. Open LeakStop & lock in your tax savings." },
+  { month: 3, day: 31, title: "Last day of FY", body: "Today is the deadline. Open PaisaBachao & lock in your tax savings." },
 ];
 
 export async function schedulePeriodicAudits() {

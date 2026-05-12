@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Platform,
@@ -16,6 +16,7 @@ import { useAppStore, store } from "../src/store";
 import { api, formatINR, formatLakhs } from "../src/api";
 import LeakageMeter from "../src/components/LeakageMeter";
 import ModuleCard from "../src/components/ModuleCard";
+import PaywallModal from "../src/components/PaywallModal";
 import { useAuth, authedFetch } from "../src/auth";
 import { schedulePeriodicAudits, ensureNotificationsPermission } from "../src/notifications";
 import { useLang } from "../src/translations";
@@ -29,6 +30,8 @@ export default function Dashboard() {
   const annual = useAppStore((s) => s.annual_leakage);
   const income = useAppStore((s) => s.annual_income);
   const loans = useAppStore((s) => s.loans);
+  const breakdown = useAppStore((s) => s.breakdown);
+  const [paywall, setPaywall] = useState(false);
 
   useEffect(() => {
     api
@@ -40,7 +43,11 @@ export default function Dashboard() {
         investments_nps: store.get().investments_nps,
       })
       .then(async (res) => {
-        store.set({ monthly_leakage: res.monthly_leakage, annual_leakage: res.annual_leakage });
+        store.set({
+          monthly_leakage: res.monthly_leakage,
+          annual_leakage: res.annual_leakage,
+          breakdown: res.breakdown,
+        });
         // Persist snapshot locally + backend (best-effort)
         const snap = {
           monthly_leakage: res.monthly_leakage,
@@ -71,12 +78,27 @@ export default function Dashboard() {
     router.push("/settings");
   };
 
+  // Real metrics from backend leakage breakdown (no hardcoded numbers)
+  const loanAnnualSavings = breakdown.loans_monthly * 12;
+  const cardsAnnualUpside = breakdown.cards_monthly * 12;
+  const taxAnnualLeak = breakdown.tax_monthly * 12;
+
+  const loanMetric =
+    loans.length === 0
+      ? t("add_loan")
+      : loanAnnualSavings > 0
+      ? formatLakhs(loanAnnualSavings)
+      : t("on_best_rate");
+  const cardsMetric =
+    cardsAnnualUpside > 0 ? `+ ${formatINR(cardsAnnualUpside)}` : "—";
+  const taxMetric = taxAnnualLeak > 0 ? formatINR(taxAnnualLeak) : "—";
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
         <View>
           <Text style={styles.brand}>
-            Leak<Text style={{ color: COLORS.primary }}>Stop</Text>
+            Paisa<Text style={{ color: COLORS.primary }}>Bachao</Text>
           </Text>
           <Text style={styles.muted}>
             {user ? `${t("dashboard_hi")} ${user.name.split(" ")[0]}` : t("dashboard_subtitle")} · {t("dashboard_live")}
@@ -130,8 +152,8 @@ export default function Dashboard() {
           badge="MODULE A · DEBT HACK"
           title={t("module_loan")}
           description={t("module_loan_desc")}
-          metric={loans.length > 0 ? "Save up to 8.5L" : "Add loan"}
-          metricLabel="LIFETIME SAVINGS"
+          metric={loanMetric}
+          metricLabel="ANNUAL SAVINGS"
           to="/loan"
         />
 
@@ -141,8 +163,8 @@ export default function Dashboard() {
           badge="MODULE B · REWARD STACK"
           title={t("module_cards")}
           description={t("module_cards_desc")}
-          metric="+ ₹14,400/yr"
-          metricLabel="MAX CASHBACK"
+          metric={cardsMetric}
+          metricLabel="POTENTIAL CASHBACK"
           to="/cards"
         />
 
@@ -152,8 +174,8 @@ export default function Dashboard() {
           badge="MODULE C · FY 2026-27"
           title={t("module_tax")}
           description={t("module_tax_desc")}
-          metric={formatINR(Math.max(annual * 0.4, 31200))}
-          metricLabel="UNLOCK INSTANTLY"
+          metric={taxMetric}
+          metricLabel="REGIME GAP"
           metricColor={COLORS.gold}
           to="/tax"
         />
@@ -177,7 +199,7 @@ export default function Dashboard() {
             </View>
             <TouchableOpacity
               style={styles.footerCta}
-              onPress={() => router.push("/loan")}
+              onPress={() => setPaywall(true)}
               testID="footer-cta"
             >
               <Text style={styles.footerCtaText}>{t("unlock")}</Text>
@@ -185,6 +207,8 @@ export default function Dashboard() {
           </View>
         )}
       </ScrollView>
+
+      <PaywallModal visible={paywall} onClose={() => setPaywall(false)} />
     </SafeAreaView>
   );
 }

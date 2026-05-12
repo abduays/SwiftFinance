@@ -188,11 +188,11 @@ function CreditCardVisual({ card }: { card: any }) {
           <Text style={cardStyles.issuer}>{card.issuer}</Text>
           <Ionicons name="wifi" size={18} color="rgba(255,255,255,0.7)" />
         </View>
-        <Text style={cardStyles.number}>•••• •••• •••• 8821</Text>
+        <Text style={cardStyles.number}>•••• •••• •••• ••••</Text>
         <View style={cardStyles.bottom}>
           <View>
-            <Text style={cardStyles.muted}>CARDHOLDER</Text>
-            <Text style={cardStyles.name}>YOU</Text>
+            <Text style={cardStyles.muted}>NETWORK</Text>
+            <Text style={cardStyles.name}>{card.issuer.toUpperCase()}</Text>
           </View>
           <Text style={cardStyles.brand}>{card.name.toUpperCase()}</Text>
         </View>

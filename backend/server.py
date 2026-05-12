@@ -191,7 +191,7 @@ def tax_old_regime(income, c80, d80, nps):
 # ---------- Public endpoints ----------
 @api_router.get("/")
 async def root():
-    return {"message": "LeakStop API", "version": "2.0"}
+    return {"message": "PaisaBachao API", "version": "2.0"}
 
 @api_router.get("/market-rates")
 async def market_rates():
@@ -270,7 +270,18 @@ async def compute_leakage(p: ProfileCreate):
     nt = tax_new_regime(p.annual_income)
     ot = tax_old_regime(p.annual_income, p.investments_80c, p.investments_80d, p.investments_nps)
     tax_leak_m = abs(nt - ot) / 12
-    card_leak = 6000 * 4.5 / 100
+    # Card optimization upside: top-card net annual value across categories for an
+    # assumed avg monthly spend = 8% of net income (RBI middle-class benchmark).
+    # If income missing, fall back to ₹0 (no fake leakage).
+    monthly_spend = max(p.annual_income * 0.08 / 12, 0)
+    card_leak = 0.0
+    if monthly_spend > 0:
+        best_net = 0.0
+        for c in CREDIT_CARDS:
+            best_pct = max(c["rewards"].values())
+            net_year = monthly_spend * best_pct / 100 * 12 - c["annual_fee"]
+            best_net = max(best_net, net_year)
+        card_leak = max(best_net, 0) / 12  # monthly upside
     total = loan_leak + tax_leak_m + card_leak
     return {"monthly_leakage": round(total, 2), "annual_leakage": round(total * 12, 2),
             "breakdown": {"loans_monthly": round(loan_leak, 2),
@@ -406,7 +417,7 @@ def _model_spec(name: str):
         return ("gemini", "gemini-3-flash-preview")
     return ("anthropic", "claude-sonnet-4-5-20250929")
 
-SYSTEM_TEMPLATE = """You are LeakStop's personal-finance advisor for Indian middle-class users (₹7L+ income).
+SYSTEM_TEMPLATE = """You are PaisaBachao's personal-finance advisor for Indian middle-class users (₹7L+ income).
 Be crisp, friendly and concrete. Use Indian rupee (₹), lakhs/crores, and real Indian instruments (PPF, ELSS, NPS, EPF, FD).
 Always reply in {language}. If user mixes English with their language, still reply mostly in {language}.
 Never give legal/SEBI-registered advice — keep it educational. Cite numeric reasoning with one short example."""
@@ -532,7 +543,7 @@ async def razorpay_webhook(request: Request):
             )
             # Queue a WhatsApp notification for premium activation
             await _queue_whatsapp(order["user_id"], "subscription_active",
-                                  f"🎉 LeakStop Premium is now active. Plan: {plan.upper()}. We'll WhatsApp your next leakage audit on the quarterly check-in.")
+                                  f"🎉 PaisaBachao Premium is now active. Plan: {plan.upper()}. We'll WhatsApp your next leakage audit on the quarterly check-in.")
     elif event == "payment.failed" and order_id:
         await db.orders.update_one(
             {"order_id": order_id},
@@ -598,7 +609,7 @@ async def set_whatsapp(prefs: WhatsAppPrefs,
     )
     if prefs.enabled and prefs.phone:
         await _queue_whatsapp(user_id, "welcome",
-                              "Welcome to LeakStop on WhatsApp! 🟢 We'll ping you every quarter with your wealth-audit summary.")
+                              "Welcome to PaisaBachao on WhatsApp! 🟢 We'll ping you every quarter with your wealth-audit summary.")
     return {"ok": True}
 
 

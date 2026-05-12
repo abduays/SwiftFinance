@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "LeakStop",
-    "slug": "leakstop",
+    "name": "PaisaBachao",
+    "slug": "paisabachao",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "leakstop",
+    "scheme": "paisabachao",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

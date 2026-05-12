@@ -52,10 +52,10 @@ export default function Index() {
   return (
     <View style={styles.container} testID="splash">
       <View style={styles.logo}>
-        <Text style={styles.brand}>Leak</Text>
-        <Text style={styles.brandAccent}>Stop</Text>
+        <Text style={styles.brand}>Paisa</Text>
+        <Text style={styles.brandAccent}>Bachao</Text>
       </View>
-      <Text style={styles.tagline}>Stop the leak. Start the wealth.</Text>
+      <Text style={styles.tagline}>Stop the leak. Start the bachat.</Text>
       <ActivityIndicator color={COLORS.primary} style={{ marginTop: SPACING.lg }} />
     </View>
   );

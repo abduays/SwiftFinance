@@ -17,6 +17,7 @@ export type AppState = {
   investments_nps: number;
   monthly_leakage: number;
   annual_leakage: number;
+  breakdown: { loans_monthly: number; tax_monthly: number; cards_monthly: number };
 };
 
 const DEFAULTS: AppState = {
@@ -30,6 +31,7 @@ const DEFAULTS: AppState = {
   investments_nps: 0,
   monthly_leakage: 0,
   annual_leakage: 0,
+  breakdown: { loans_monthly: 0, tax_monthly: 0, cards_monthly: 0 },
 };
 
 let state: AppState = { ...DEFAULTS };
