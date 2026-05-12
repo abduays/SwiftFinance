@@ -196,6 +196,21 @@ export default function Settings() {
               </View>
             )}
           </View>
+
+          {/* Admin entry */}
+          <TouchableOpacity
+            style={styles.adminCard}
+            onPress={() => router.push("/admin")}
+            testID="admin-entry"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="shield-checkmark" size={22} color={COLORS.gold} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.adminTitle}>Admin Console</Text>
+              <Text style={styles.adminSub}>Manage live RBI rates &amp; card catalog (token-gated)</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.text_secondary} />
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -237,6 +252,19 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.full,
   },
   outText: { color: COLORS.danger, fontSize: 12, fontWeight: "700" },
+  adminCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderColor: "rgba(251,191,36,0.4)",
+    borderWidth: 1,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.lg,
+    marginTop: SPACING.md,
+  },
+  adminTitle: { color: COLORS.text_primary, fontWeight: "800", fontSize: 14 },
+  adminSub: { color: COLORS.text_secondary, fontSize: 11, marginTop: 2 },
   langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: SPACING.md },
   langChip: {
     flexDirection: "row",

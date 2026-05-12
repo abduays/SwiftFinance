@@ -14,7 +14,7 @@ import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { COLORS, RADIUS, SPACING } from "../src/theme";
-import { api, formatINR } from "../src/api";
+import { api, formatINR, formatRelTime } from "../src/api";
 import PaywallModal from "../src/components/PaywallModal";
 
 type Category = "grocery" | "travel" | "fuel" | "dining";
@@ -32,6 +32,11 @@ export default function CardsScreen() {
   const [ranked, setRanked] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [paywall, setPaywall] = useState(false);
+  const [ratesMeta, setRatesMeta] = useState<{ source: string; last_updated_at: string | null } | null>(null);
+
+  useEffect(() => {
+    api.marketRates().then((m) => setRatesMeta({ source: m.source, last_updated_at: m.last_updated_at })).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +72,15 @@ export default function CardsScreen() {
         <Text style={styles.sub}>
           Pick a category & monthly spend — we rank India&apos;s best cards by net annual value.
         </Text>
+
+        {ratesMeta && (
+          <View style={styles.freshness} testID="cards-freshness">
+            <Ionicons name="cellular" size={11} color={COLORS.primary} />
+            <Text style={styles.freshnessText}>
+              Card catalog · last updated {formatRelTime(ratesMeta.last_updated_at)}
+            </Text>
+          </View>
+        )}
 
         <Text style={styles.sectionLabel}>SPEND CATEGORY</Text>
         <View style={styles.catRow}>
@@ -238,6 +252,21 @@ const styles = StyleSheet.create({
   },
   barTitle: { color: COLORS.text_primary, fontWeight: "700", fontSize: 16 },
   scroll: { padding: SPACING.lg, paddingBottom: SPACING.xxl },
+  freshness: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(46,213,115,0.08)",
+    borderColor: "rgba(46,213,115,0.25)",
+    borderWidth: 1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 5,
+    borderRadius: RADIUS.md,
+    alignSelf: "flex-start",
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  freshnessText: { color: COLORS.text_secondary, fontSize: 11, fontWeight: "600" },
   eyebrow: { color: COLORS.primary, fontSize: 11, letterSpacing: 1.6, fontWeight: "700" },
   title: {
     color: COLORS.text_primary,

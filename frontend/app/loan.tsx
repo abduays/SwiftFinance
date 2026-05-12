@@ -14,7 +14,7 @@ import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
 import { COLORS, RADIUS, SPACING } from "../src/theme";
 import { useAppStore } from "../src/store";
-import { api, formatINR, formatLakhs } from "../src/api";
+import { api, formatINR, formatLakhs, formatRelTime } from "../src/api";
 import AreaChart from "../src/components/AreaChart";
 import PaywallModal from "../src/components/PaywallModal";
 
@@ -37,6 +37,11 @@ export default function LoanScreen() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [paywall, setPaywall] = useState(false);
+  const [ratesMeta, setRatesMeta] = useState<{ source: string; last_updated_at: string | null } | null>(null);
+
+  useEffect(() => {
+    api.marketRates().then((m) => setRatesMeta({ source: m.source, last_updated_at: m.last_updated_at })).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (loan) setTenureYears(Math.round(loan.tenure_months / 12));
@@ -108,6 +113,14 @@ export default function LoanScreen() {
     <SafeAreaView style={styles.safe}>
       <Header onBack={() => router.back()} title="Loan Arbitrage" />
       <ScrollView contentContainerStyle={styles.scroll} testID="loan-screen">
+        {ratesMeta && (
+          <View style={styles.freshness} testID="loan-rates-freshness">
+            <Ionicons name="cellular" size={11} color={COLORS.primary} />
+            <Text style={styles.freshnessText}>
+              Market rate {ratesMeta.source === "rbi_press_release" ? "from RBI" : ratesMeta.source === "admin_manual" ? "admin-set" : "default"} · updated {formatRelTime(ratesMeta.last_updated_at)}
+            </Text>
+          </View>
+        )}
         {loans.length > 1 && (
           <View style={styles.tabs}>
             {loans.map((l, i) => (
@@ -288,6 +301,20 @@ const hStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { padding: SPACING.lg, paddingBottom: SPACING.xxl },
+  freshness: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(46,213,115,0.08)",
+    borderColor: "rgba(46,213,115,0.25)",
+    borderWidth: 1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 5,
+    borderRadius: RADIUS.md,
+    alignSelf: "flex-start",
+    marginBottom: SPACING.md,
+  },
+  freshnessText: { color: COLORS.text_secondary, fontSize: 11, fontWeight: "600" },
   tabs: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
   tab: {
     paddingVertical: 8,
