@@ -1,19 +1,53 @@
 import { useEffect } from "react";
 import { useRouter } from "expo-router";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View, Platform } from "react-native";
+import * as Linking from "expo-linking";
 import { COLORS, SPACING } from "../src/theme";
+import { useAuth } from "../src/auth";
 import { useAppStore } from "../src/store";
 
 export default function Index() {
   const router = useRouter();
+  const { user, loading, googleSession } = useAuth();
   const onboarded = useAppStore((s) => s.onboarded);
 
+  // Handle Google session_id arriving via deep-link or web hash
   useEffect(() => {
+    const handleUrl = async (url: string | null) => {
+      if (!url) return;
+      // session_id may arrive as #session_id=... or ?session_id=...
+      const m = url.match(/[#?&]session_id=([^&]+)/);
+      if (m && m[1]) {
+        try {
+          await googleSession(decodeURIComponent(m[1]));
+          // clean URL on web
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+        } catch (e) {
+          console.warn("google session failed", e);
+        }
+      }
+    };
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      handleUrl(window.location.href);
+    } else {
+      Linking.getInitialURL().then(handleUrl);
+    }
+    const sub = Linking.addEventListener("url", (e) => handleUrl(e.url));
+    return () => sub.remove();
+  }, [googleSession]);
+
+  useEffect(() => {
+    if (loading) return;
     const t = setTimeout(() => {
-      router.replace(onboarded ? "/dashboard" : "/onboarding");
-    }, 700);
+      if (!user) router.replace("/auth");
+      else if (!onboarded) router.replace("/onboarding");
+      else router.replace("/dashboard");
+    }, 600);
     return () => clearTimeout(t);
-  }, [onboarded, router]);
+  }, [user, loading, onboarded, router]);
 
   return (
     <View style={styles.container} testID="splash">

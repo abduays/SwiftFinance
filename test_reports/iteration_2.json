@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 2: validated the new auth+payments+advisor stack. 28/28 pytest backend tests pass (all 17 new + 11 regression). Frontend mobile flow passes end-to-end after fixing one P0 React bug in advisor.tsx (zustand selector returned a fresh object literal each render -> 'getSnapshot should be cached' -> Maximum update depth exceeded). After fix, /advisor renders, lang sheet opens, suggestion chip triggers Hindi/Claude reply in ~14s, dashboard greets by first name, Razorpay checkout WebView mounts via testID=paywall-checkout.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "/app/frontend/app/advisor.tsx", "issue": "FIXED: zustand selector `useAppStore((s) => ({...}))` returned a new object literal each call which is incompatible with useSyncExternalStore -> 'The result of getSnapshot should be cached' -> 'Maximum update depth exceeded' red-screen on /advisor. Replaced with primitive selectors + useMemo. Verified working."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_payments_advisor.py",
+    "/app/backend/tests/test_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Audit any other screen using `useAppStore((s) => ({...}))` pattern; only advisor.tsx had it but the same pitfall could be reintroduced. Consider adding a `useAppStoreShallow` helper or migrating the store to a library (zustand proper) that handles selector identity.",
+    "Optional: gate /onboarding so a user who has saved a /me/profile skips it on login. Currently /auth/login always redirects to /onboarding even when the user already has a profile in MongoDB.",
+    "Razorpay checkout WebView only verified to MOUNT; a real test-mode payment cannot be completed via Playwright (Razorpay sandbox iframe is sandboxed). Backend signature verification path is covered by unit test (POST /api/payments/verify returns 400 on bad signature)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 485 lines and mixes auth, profile, payments, advisor, calculators. Recommend splitting into routers/ (auth.py already extracted; pull advisor.py and payments.py next).",
+    "logger used inside advisor_chat is defined at the bottom of server.py — works because Python resolves at call-time, but a top-of-module logger would be safer/clearer.",
+    "auth.py: bcrypt rounds use default (12). Fine for dev; consider parameterising via env.",
+    "auth.py: `exchange_emergent_session` raises HTTPException directly which mixes layers; acceptable here.",
+    "src/store.ts: home-grown useSyncExternalStore store has no shallow-equality helper, which is what trapped advisor.tsx. Consider adding `useAppStoreShallow` or document the pitfall in the file header."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_payments_advisor.py (new)",
+    "/app/frontend/app/advisor.tsx (fix: primitive selectors + useMemo for profile)"
+  ],
+  "success_rate": {"backend": "100% (28/28 pytest)", "frontend": "100% (all flows in spec verified after advisor fix)"},
+  "seed_data_creation": "Each test run registers a fresh TEST_<uuid>@leakstop.in user via /api/auth/register. Seed user demo@leakstop.in/demo12345 verified to log in successfully.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public preview: https://loan-optimizer-11.preview.emergentagent.com. Backend tests: pytest /app/backend/tests/ -v. Frontend tests via Playwright at mobile viewport 390x844. New testIDs covered: google-btn, name-input, email-input, password-input, auth-submit, swap-mode-btn, auth-error, advisor-entry, advisor-back, lang-btn, lang-sheet, lang-{code}, model-{name}, advisor-thread, suggestion-chip, msg-{role}, advisor-input, advisor-send, paywall-modal, paywall-close, plan-monthly, plan-yearly, paywall-unlock, paywall-checkout, paywall-success, checkout-back. Razorpay test keys: rzp_test_SoPOfCPaZwSEa3. Real Razorpay payment cannot be completed in automation; mount is verified via testID=paywall-checkout.",
+  "rca_of_issue": "Bug: navigating to /advisor crashed with Maximum update depth exceeded. RCA: AdvisorScreen called `useAppStore((s) => ({income: s.annual_income, loans: s.loans, ...}))`. The store is built on useSyncExternalStore (src/store.ts) and the selector is evaluated inside getSnapshot. Returning a fresh object literal on every call -> getSnapshot identity changes every render -> React schedules another render -> infinite loop. Fix: split into individual primitive selectors and wrap with useMemo. Reproduction: log in, visit /advisor. After fix and `supervisorctl restart expo`, /advisor mounts, suggestion-chip click triggers /api/advisor/chat which returns Hindi/English reply in ~10–18s."
+}

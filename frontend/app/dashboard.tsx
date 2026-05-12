@@ -1,5 +1,7 @@
 import React, { useEffect } from "react";
 import {
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,16 +16,18 @@ import { useAppStore, store } from "../src/store";
 import { api, formatINR, formatLakhs } from "../src/api";
 import LeakageMeter from "../src/components/LeakageMeter";
 import ModuleCard from "../src/components/ModuleCard";
+import { useAuth } from "../src/auth";
+import { schedulePeriodicAudits, ensureNotificationsPermission } from "../src/notifications";
 
 export default function Dashboard() {
   const router = useRouter();
+  const { user, logout } = useAuth();
   const monthly = useAppStore((s) => s.monthly_leakage);
   const annual = useAppStore((s) => s.annual_leakage);
   const income = useAppStore((s) => s.annual_income);
   const loans = useAppStore((s) => s.loans);
 
   useEffect(() => {
-    let cancelled = false;
     api
       .leakage({
         annual_income: income,
@@ -32,18 +36,54 @@ export default function Dashboard() {
         investments_80d: store.get().investments_80d,
         investments_nps: store.get().investments_nps,
       })
-      .then((res) => {
-        if (cancelled) return;
-        store.set({
-          monthly_leakage: res.monthly_leakage,
-          annual_leakage: res.annual_leakage,
-        });
-      })
+      .then((res) => store.set({ monthly_leakage: res.monthly_leakage, annual_leakage: res.annual_leakage }))
       .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
   }, [income, loans]);
+
+  useEffect(() => {
+    // Schedule quarterly audit notifications (mobile only)
+    schedulePeriodicAudits();
+  }, []);
+
+  const isPremium = !!user?.subscription?.active;
+
+  const onProfilePress = () => {
+    Alert.alert(
+      user?.name ?? "Account",
+      `${user?.email ?? ""}\n${isPremium ? "★ Premium subscriber" : "Free plan"}`,
+      [
+        {
+          text: "Enable reminders",
+          onPress: async () => {
+            const ok = await ensureNotificationsPermission();
+            if (Platform.OS === "web") {
+              Alert.alert("Heads up", "Push reminders work on the installed mobile app, not web preview.");
+            } else if (ok) {
+              await schedulePeriodicAudits();
+              Alert.alert("Done", "Quarterly leakage audits scheduled.");
+            }
+          },
+        },
+        {
+          text: "Reset onboarding",
+          onPress: () => {
+            store.reset();
+            router.replace("/onboarding");
+          },
+        },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: async () => {
+            await logout();
+            store.reset();
+            router.replace("/auth");
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -52,17 +92,13 @@ export default function Dashboard() {
           <Text style={styles.brand}>
             Leak<Text style={{ color: COLORS.primary }}>Stop</Text>
           </Text>
-          <Text style={styles.muted}>Your wealth audit · LIVE</Text>
+          <Text style={styles.muted}>
+            {user ? `Hi ${user.name.split(" ")[0]}` : "Your wealth audit"} · LIVE
+          </Text>
         </View>
-        <TouchableOpacity
-          style={styles.profileBtn}
-          onPress={() => {
-            store.reset();
-            router.replace("/onboarding");
-          }}
-          testID="reset-btn"
-        >
-          <Ionicons name="person-circle" size={28} color={COLORS.text_primary} />
+        <TouchableOpacity style={styles.profileBtn} onPress={onProfilePress} testID="profile-btn">
+          {isPremium && <View style={styles.premiumDot} />}
+          <Ionicons name="person-circle" size={32} color={COLORS.text_primary} />
         </TouchableOpacity>
       </View>
 
@@ -78,11 +114,28 @@ export default function Dashboard() {
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>DEBTS TRACKED</Text>
             <Text style={styles.statValue}>{loans.length}</Text>
-            <Text style={styles.statSub}>
-              {loans.map((l) => l.loan_type).join(", ") || "none"}
-            </Text>
+            <Text style={styles.statSub}>{loans.map((l) => l.loan_type).join(", ") || "none"}</Text>
           </View>
         </View>
+
+        {/* Advisor entry */}
+        <TouchableOpacity
+          testID="advisor-entry"
+          style={styles.advisorCard}
+          onPress={() => router.push("/advisor")}
+          activeOpacity={0.85}
+        >
+          <View style={styles.advisorIcon}>
+            <Ionicons name="sparkles" size={22} color={COLORS.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.advisorTitle}>Ask the AI Advisor</Text>
+            <Text style={styles.advisorSub}>
+              Claude 4.5 + Gemini 3 · in हिन्दी, தமிழ், বাংলা & more
+            </Text>
+          </View>
+          <Ionicons name="arrow-forward" size={20} color={COLORS.text_primary} />
+        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>Money-Making Modules</Text>
         <Text style={styles.sectionSub}>Tap a card to fix the leak.</Text>
@@ -121,22 +174,34 @@ export default function Dashboard() {
           to="/tax"
         />
 
-        <View style={styles.footerCard} testID="footer-promo">
-          <Ionicons name="rocket" size={22} color={COLORS.gold} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.footerTitle}>Upgrade to Premium</Text>
-            <Text style={styles.footerSub}>
-              Detailed loan-switch plan + quarterly audits at ₹75/mo.
-            </Text>
+        {isPremium ? (
+          <View style={styles.premiumCard} testID="premium-active">
+            <Ionicons name="diamond" size={22} color={COLORS.gold} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.premiumTitle}>Premium Active</Text>
+              <Text style={styles.premiumSub}>
+                Plan: {user?.subscription?.plan?.toUpperCase()} · Enjoy unlimited audits.
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.footerCta}
-            onPress={() => router.push("/loan")}
-            testID="footer-cta"
-          >
-            <Text style={styles.footerCtaText}>Unlock</Text>
-          </TouchableOpacity>
-        </View>
+        ) : (
+          <View style={styles.footerCard} testID="footer-promo">
+            <Ionicons name="rocket" size={22} color={COLORS.gold} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.footerTitle}>Upgrade to Premium</Text>
+              <Text style={styles.footerSub}>
+                Detailed loan-switch plan + quarterly audits at ₹75/mo.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.footerCta}
+              onPress={() => router.push("/loan")}
+              testID="footer-cta"
+            >
+              <Text style={styles.footerCtaText}>Unlock</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -154,9 +219,19 @@ const styles = StyleSheet.create({
   },
   brand: { color: COLORS.text_primary, fontSize: 26, fontWeight: "800", letterSpacing: -1 },
   muted: { color: COLORS.text_muted, fontSize: 11, letterSpacing: 1.2, fontWeight: "700" },
-  profileBtn: { padding: 4 },
+  profileBtn: { padding: 4, position: "relative" },
+  premiumDot: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.gold,
+    zIndex: 2,
+  },
   scroll: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
-  statRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.lg },
+  statRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
   statBox: {
     flex: 1,
     backgroundColor: COLORS.surface,
@@ -168,13 +243,42 @@ const styles = StyleSheet.create({
   statLabel: { color: COLORS.text_muted, fontSize: 10, letterSpacing: 1.2, fontWeight: "700" },
   statValue: { color: COLORS.text_primary, fontSize: 22, fontWeight: "800", marginTop: 4 },
   statSub: { color: COLORS.text_secondary, fontSize: 11, marginTop: 2 },
-  sectionTitle: {
-    color: COLORS.text_primary,
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: -0.5,
+  advisorCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.4)",
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
   },
+  advisorIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: "rgba(16,185,129,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  advisorTitle: { color: COLORS.text_primary, fontWeight: "800", fontSize: 16 },
+  advisorSub: { color: COLORS.text_secondary, fontSize: 12, marginTop: 2 },
+  sectionTitle: { color: COLORS.text_primary, fontSize: 22, fontWeight: "800", letterSpacing: -0.5 },
   sectionSub: { color: COLORS.text_secondary, fontSize: 13, marginBottom: SPACING.md },
+  premiumCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: "rgba(251,191,36,0.5)",
+    padding: SPACING.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  premiumTitle: { color: COLORS.gold, fontWeight: "800" },
+  premiumSub: { color: COLORS.text_secondary, fontSize: 12, marginTop: 2 },
   footerCard: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
